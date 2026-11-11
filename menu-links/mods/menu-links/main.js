@@ -1,12 +1,11 @@
 // 终端右键菜单：Herdr 的原生项 + 终端文本里的链接。
-// 克隆自 menu 0.1.15。只在“另一台机器”（WSL）的终端上扫链接：
-// 用 hc read 取屏幕文本，路径在那边校验存在，点击后经 wslpath
-// 交给 Windows 的 explorer.exe（等价于 WSL 里的 see()）。
+// 克隆自 menu 0.1.15。本机 Windows 的路径直接交给 explorer.exe；
+// WSL 的路径先在那边 wslpath -w，再交给 explorer.exe；URL 用 rundll32。
 // ↑/↓ 移动，Enter 执行，Esc 关闭。
 
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { run, props, closeOverlay, openOverlay, theme, keys, terminals, spaces, panes, exec, hc, notify, window } from "herdr";
+import { run, props, closeOverlay, openOverlay, theme, keys, terminals, spaces, panes, exec, hc, home as homeDir, notify, window } from "herdr";
 import { absolute, barePath, classify, describe, findLinks } from "./links.js";
 
 const MAX_LINKS = 6;
@@ -108,10 +107,20 @@ function selectedLink(cx) {
   return link ? { ...link, selected: true } : null;
 }
 
-// 在终端所在机器上做一次 sh 检查：存在的绝对路径，返回 路径 -> { real, dir }。
-async function existing(machine, paths) {
+// 解析 sh/PowerShell 的输出：每条 `下标\t类型\t路径\0`。
+function foundPaths(stdout, paths) {
   const out = new Map();
-  if (!paths.length) return out;
+  for (const chunk of String(stdout ?? "").split("\0")) {
+    if (!chunk) continue;
+    const [i, type, ...rest] = chunk.split("\t");
+    const real = rest.join("\t");
+    if (real && paths[Number(i)]) out.set(paths[Number(i)], { real, dir: type === "d" });
+  }
+  return out;
+}
+
+// 本机之外的机器（WSL 等）：一次 sh 批量 test -e。
+async function existingShell(machine, paths) {
   const script = `i=0
 for p in "$@"; do
   if [ -e "$p" ]; then
@@ -121,12 +130,33 @@ for p in "$@"; do
   i=$((i+1))
 done`;
   const r = await exec("sh", ["-c", script, "links", ...paths], { on: machine });
-  for (const chunk of (r.stdout ?? "").split("\0")) {
-    if (!chunk) continue;
-    const [i, type, real] = chunk.split("\t");
-    if (real && paths[Number(i)]) out.set(paths[Number(i)], { real, dir: type === "d" });
-  }
-  return out;
+  return foundPaths(r.stdout, paths);
+}
+
+// 本机 Windows：一次 PowerShell 批量 Test-Path。
+async function existingWindows(paths) {
+  const quote = (p) => `'${p.replace(/'/g, "''")}'`;
+  const script = [
+    "$ErrorActionPreference='SilentlyContinue'",
+    `$ps=@(${paths.map(quote).join(",")})`,
+    "$i=0",
+    "foreach ($p in $ps) {",
+    "  if (Test-Path -LiteralPath $p) {",
+    "    if ((Get-Item -LiteralPath $p).PSIsContainer) { $d='d' } else { $d='f' }",
+    "    [Console]::Out.Write(\"$i`t$d`t$p`0\")",
+    "  }",
+    "  $i++",
+    "}",
+  ].join("\n");
+  const r = await exec("powershell", ["-NoProfile", "-NonInteractive", "-Command", script]);
+  return foundPaths(r.stdout, paths);
+}
+
+// 存在的绝对路径 → 路径 -> { real, dir }。
+async function existing(machine, paths) {
+  if (!paths.length) return new Map();
+  if (machine || window()?.platform !== "windows") return existingShell(machine, paths);
+  return existingWindows(paths);
 }
 
 // 链接列表 → 菜单项；不存在的路径丢掉，最多 MAX_LINKS 条。
@@ -141,10 +171,12 @@ async function linkItems(text, machine, cwd, selected) {
     byKey.set(key, l);
   }
   const list = [...byKey.values()].sort((a, b) => Number(Boolean(b.selected)) - Number(Boolean(a.selected)) || (b.row ?? 0) - (a.row ?? 0));
-  // ~ 与相对路径都在这里补齐：那边只收到绝对路径。
+  // ~ 与相对路径都在这里补齐：检查与打开只收到绝对路径。
   let home = "";
   if (list.some((l) => l.kind === "path")) {
-    home = (await exec("sh", ["-c", 'printf %s "$HOME"'], { on: machine })).stdout.trim();
+    home = machine
+      ? (await exec("sh", ["-c", 'printf %s "$HOME"'], { on: machine })).stdout.trim()
+      : homeDir();
   }
   const paths = [...new Set(list
     .filter((l) => l.kind === "path")
@@ -194,10 +226,16 @@ async function openLink(open, machine) {
     return;
   }
   const platform = window()?.platform;
-  const opener = platform === "windows" ? "explorer.exe" : platform === "macos" ? "open" : "xdg-open";
+  if (platform === "windows") {
+    // 本机 Windows：路径直接交给 explorer.exe；URL 用 rundll32，避开 = 参数。
+    if (open.kind === "url") await exec("rundll32.exe", ["url.dll,FileProtocolHandler", open.value]);
+    else await exec("explorer.exe", [open.value]);
+    // explorer.exe / rundll32 成功时也可能返回 1，不看退出码。
+    return;
+  }
+  const opener = platform === "macos" ? "open" : "xdg-open";
   const r = await exec(opener, [open.value]);
-  // Windows 的 explorer.exe 成功时也可能返回 1。
-  if (r.code !== 0 && platform !== "windows") throw new Error((r.stderr ?? "").trim() || `退出码 ${r.code}`);
+  if (r.code !== 0) throw new Error((r.stderr ?? "").trim() || `退出码 ${r.code}`);
 }
 
 export default class Menu extends View {
@@ -222,10 +260,9 @@ export default class Menu extends View {
       });
   }
 
-  // 读屏幕文本（不含回滚历史，和 Herdr 自己的链接检测一致），在那边校验路径。
+  // 读屏幕文本（不含回滚历史，和 Herdr 自己的链接检测一致），在终端所在机器上校验路径。
   scan(terminal, selected, cx) {
     const machine = terminal.includes("/") ? terminal.split("/")[0] : null;
-    if (!machine) return;
     cx.spawn(async (cx) => {
       let links = [];
       try {

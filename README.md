@@ -4,7 +4,7 @@
 
 | Mod | |
 | --- | --- |
-| [Menu links](menu-links/) | 终端右键菜单里列出屏幕上的链接；WSL 的路径用 Windows 资源管理器打开 |
+| [Menu links](menu-links/) | 终端右键菜单里列出屏幕上的链接；本机 Windows 直接 `explorer.exe`，WSL 的路径经 `wslpath` 打开 |
 
 ## 用法
 

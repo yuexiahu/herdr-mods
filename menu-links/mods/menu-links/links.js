@@ -5,6 +5,8 @@
 const SCHEME = /^(?:https?|ftp|file|ssh|git|mailto|tel|magnet|ipfs|ipns|gemini|gopher|news):/i;
 const ANY_SCHEME = /^[A-Za-z][A-Za-z0-9+.-]*:\/\//;
 const WIN_PATH = /^[A-Za-z]:[\\/]/;
+// \\server\share\...（Windows 的 UNC 路径）
+const UNC_PATH = /^\\\\[^\\]+\\/;
 
 // 去掉包在链接外面的括号、引号、句末标点，以及 `VAR=路径` 的赋值前缀。
 function clean(token) {
@@ -22,11 +24,13 @@ export function barePath(path) {
   return path.replace(/(?::\d+(?:-\d+)?){1,2}$/, "");
 }
 
-// 把 ~/ 和相对路径补成绝对路径（检查存在性和交给 wslpath 都用它）。
+// 把 ~/、~\ 与相对路径补成绝对路径（检查存在性和打开都用它）。
 export function absolute(path, cwd, home) {
   let p = path;
-  if (p.startsWith("~/") && home) p = `${home}/${p.slice(2)}`;
-  if (!p.startsWith("/") && !WIN_PATH.test(p)) p = `${(cwd || "/").replace(/\/+$/, "")}/${p}`;
+  if ((p.startsWith("~/") || p.startsWith("~\\")) && home) p = `${home}/${p.slice(2)}`;
+  if (!p.startsWith("/") && !WIN_PATH.test(p) && !UNC_PATH.test(p)) {
+    p = `${(cwd || "/").replace(/[\\/]+$/, "")}/${p}`;
+  }
   return p;
 }
 
@@ -57,20 +61,20 @@ export function validUrl(t) {
 export function classify(token) {
   const t = clean(token);
   if (!t || t.length > 1024) return null;
-  // file:///home/x：按本机路径处理，交给 wslpath/资源管理器。
+  // file:///home/x 或 file:///C:/x：按本机路径处理，交给 wslpath/资源管理器。
   if (/^file:\/\//i.test(t)) {
     let p = t.slice(7).replace(/^localhost/i, "");
-    if (p.startsWith("/")) {
-      try { p = decodeURIComponent(p); } catch { /* 保留原样 */ }
-      return { kind: "path", path: p };
-    }
+    try { p = decodeURIComponent(p); } catch { /* 保留原样 */ }
+    // file:///C:/Users/... 在 Windows 上就是 C:/Users/...
+    if (/^\/[A-Za-z]:[\\/]/.test(p)) p = p.slice(1);
+    if (p.startsWith("/") || WIN_PATH.test(p) || UNC_PATH.test(p)) return { kind: "path", path: p };
   }
   if (SCHEME.test(t) || ANY_SCHEME.test(t)) return validUrl(t) ? { kind: "url", url: t } : null;
-  if (t.startsWith("~/")) return { kind: "path", path: t };
+  if (t.startsWith("~/") || t.startsWith("~\\")) return { kind: "path", path: t };
   if (t.startsWith("/") && t.length > 2) return { kind: "path", path: t };
-  if (WIN_PATH.test(t)) return { kind: "path", path: t };
-  // 相对路径：带目录，且末尾像扩展名（可跟 :行号）。
-  if (t.includes("/") && /[^/]\.[A-Za-z0-9]{1,10}(?::\d+(?::\d+)?)?$/.test(t)) {
+  if (WIN_PATH.test(t) || UNC_PATH.test(t)) return { kind: "path", path: t };
+  // 相对路径：带目录，且末尾像扩展名（可跟 :行号）；/ 和 \ 都算。
+  if (/[\\/]/.test(t) && /[^\\/]\.[A-Za-z0-9]{1,10}(?::\d+(?::\d+)?)?$/.test(t)) {
     return { kind: "path", path: t };
   }
   return null;
