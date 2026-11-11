@@ -172,19 +172,22 @@ async function linkItems(text, machine, cwd, selected) {
     byKey.set(key, l);
   }
   const list = [...byKey.values()].sort((a, b) => Number(Boolean(b.selected)) - Number(Boolean(a.selected)) || (b.row ?? 0) - (a.row ?? 0));
+  // 选中的和屏幕上的可能一个是被截断的前缀：只留更长的那个。
+  const links = list.filter((l) => l.kind !== "url"
+    || !list.some((o) => o !== l && o.kind === "url" && o.url.length > l.url.length && o.url.startsWith(l.url)));
   // ~ 与相对路径都在这里补齐：检查与打开只收到绝对路径。
   let home = "";
-  if (list.some((l) => l.kind === "path")) {
+  if (links.some((l) => l.kind === "path")) {
     home = machine
       ? (await exec("sh", ["-c", 'printf %s "$HOME"'], { on: machine })).stdout.trim()
       : homeDir();
   }
-  const paths = [...new Set(list
+  const paths = [...new Set(links
     .filter((l) => l.kind === "path")
     .map((l) => absolute(barePath(l.path), cwd, home)))];
   const real = await existing(machine, paths);
   const out = [];
-  for (const l of list) {
+  for (const l of links) {
     if (l.kind === "url") {
       const { label, hint } = describe(l, l.url);
       out.push({ kind: "link", label, hint, hintIcon: "mods/menu-links/external-link.svg", icon: "mods/menu-links/link.svg", machine, open: { kind: "url", value: l.url } });

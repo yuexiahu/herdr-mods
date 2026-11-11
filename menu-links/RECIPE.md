@@ -17,9 +17,9 @@
 ## 它怎么工作
 
 - 本机和另一台机器（WSL）上的终端都会扫；本机 Windows 的路径直连 `explorer.exe`，WSL 的路径在那边转成 Windows 路径后再打开。
-- `hc get <terminal> --json` 取终端的 `cwd`；`hc read <terminal> --json` 取当前屏幕文本（不含回滚历史）。
+- 终端 `cwd` 从 Herdr 的 `terminals()` 取；`hc read <terminal> --json` 取当前屏幕文本（不含回滚历史）。
 - `links.js` 按 Ghostty 的链接规则提取候选：
-  - URL：`https?`、`ftp`、`ssh`、`mailto`、`tel`、`magnet` 等；`https://{host}{uri}`、`https://<host>/x`、`https://$HOST/x` 这类模板会被过滤；带 `//` 的协议必须有主机。
+  - URL：`https?`、`ftp`、`ssh`、`mailto`、`tel`、`magnet` 等；`https://{host}{uri}`、`https://<host>/x`、`https://$HOST/x` 这类模板会被过滤；带 `//` 的协议必须有主机。紧贴中文/全角标点的 URL（`已推送：https://...`、`（https://...）`）会从 scheme 开始抠出来；同一 URL 的截断前缀（`.../herdr-mo` 和 `.../herdr-mods`）只留更长的那个。
   - 路径：`/绝对`、`~/`、`~\`、`C:\`、`C:/`、`\\server\share`、带目录和扩展名的相对路径（`/` 和 `\` 都行）；去掉 `:12`、`:12:7`、`:70-150` 行号；`file:///...` 转成路径（`file:///C:/...` → `C:/...`）。
   - 同一个 URL/路径只留一条；Markdown 的 `[文字](链接)` 会先抠出目标。
 - `~/` 用终端所在机器的 home（本机 `home()`，远程 `$HOME`）展开，相对路径用终端 `cwd` 补齐，然后**一次**批量检查存在性：本机 Windows 用 PowerShell `Get-Item -LiteralPath`，另一台机器用 `sh` 的 `test -e`。只留下存在的路径，并区分文件夹/文件；本机 Windows 用 `Get-Item.FullName` 返回规范路径，正斜杠会统一成反斜杠。
@@ -58,6 +58,6 @@
 - `herdr-app check mods/menu-links` 通过。
 - 在 WSL 机器的终端里打印 `https://example.com` 和一个存在的路径（如 `~`），右键（或 Shift+右键）能看到链接行；点 URL 打开 Windows 默认浏览器，点路径打开资源管理器/关联程序。
 - 在本机 Windows 终端里打印 `C:\Users\<你>` 和 `https://example.com`，菜单显示存在的路径和 URL；点路径直接打开资源管理器，不存在的路径不出现。
-- 不存在的路径、`https://{host}{uri}` 不会出现在菜单里。
+- 不存在的路径、`https://{host}{uri}` 不会出现在菜单里；`已推送：https://github.com/.../herdr-mods` 只出现完整 URL，不出现 `.../herdr-mo`。
 - 选中一段链接再右键，它排在第一行；点击后正常打开。
 - Split right / Split down / Zoom / Close pane 等原菜单项仍然工作。

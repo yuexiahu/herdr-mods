@@ -57,19 +57,38 @@ export function validUrl(t) {
   return /^[A-Za-z][A-Za-z0-9+.-]*:(?:\/\/[^\s/?#]+(?:[/?#]\S*)?|\S+)$/.test(t);
 }
 
+// 中日韩字符和全角标点：紧贴中文的 URL 到这些字符为止。
+const WIDE = /[\u3000-\u303f\u3400-\u9fff\uff00-\uffef]/;
+const ANY_URL_SCHEME = /(?:https?|ftp|file|ssh|git|mailto|tel|magnet|ipfs|ipns|gemini|gopher|news):/i;
+
+// “已推送：https://...” / “（https://...）” 这种紧贴文字的 URL：从 scheme 开始抠出来。
+function embeddedUrl(token) {
+  const m = ANY_URL_SCHEME.exec(token);
+  if (!m) return null;
+  // 前面是字母/数字说明它不是一个独立 URL（foohttps://...）。
+  if (m.index > 0 && /[A-Za-z0-9]/.test(token[m.index - 1])) return null;
+  let s = token.slice(m.index);
+  const cut = s.search(WIDE);
+  if (cut >= 0) s = s.slice(0, cut);
+  return clean(s);
+}
+
 // 一个词是不是链接；是的话返回它的种类。
 export function classify(token) {
   const t = clean(token);
   if (!t || t.length > 1024) return null;
-  // file:///home/x 或 file:///C:/x：按本机路径处理，交给 wslpath/资源管理器。
-  if (/^file:\/\//i.test(t)) {
-    let p = t.slice(7).replace(/^localhost/i, "");
-    try { p = decodeURIComponent(p); } catch { /* 保留原样 */ }
-    // file:///C:/Users/... 在 Windows 上就是 C:/Users/...
-    if (/^\/[A-Za-z]:[\\/]/.test(p)) p = p.slice(1);
-    if (p.startsWith("/") || WIN_PATH.test(p) || UNC_PATH.test(p)) return { kind: "path", path: p };
+  // 先找 URL（可能在中文标点后面），file:// 再按本机路径处理。
+  const url = embeddedUrl(t) ?? ((SCHEME.test(t) || ANY_SCHEME.test(t)) ? t : null);
+  if (url) {
+    if (/^file:\/\//i.test(url)) {
+      let p = url.slice(7).replace(/^localhost/i, "");
+      try { p = decodeURIComponent(p); } catch { /* 保留原样 */ }
+      // file:///C:/Users/... 在 Windows 上就是 C:/Users/...
+      if (/^\/[A-Za-z]:[\\/]/.test(p)) p = p.slice(1);
+      if (p.startsWith("/") || WIN_PATH.test(p) || UNC_PATH.test(p)) return { kind: "path", path: p };
+    }
+    return validUrl(url) ? { kind: "url", url } : null;
   }
-  if (SCHEME.test(t) || ANY_SCHEME.test(t)) return validUrl(t) ? { kind: "url", url: t } : null;
   if (t.startsWith("~/") || t.startsWith("~\\")) return { kind: "path", path: t };
   if (t.startsWith("/") && t.length > 2) return { kind: "path", path: t };
   if (WIN_PATH.test(t) || UNC_PATH.test(t)) return { kind: "path", path: t };
@@ -94,6 +113,14 @@ export function findLinks(text) {
       byKey.set(key, { ...link, key, row });
     }
   });
+  const all = [...byKey.values()];
+  // 被截断的 URL（是另一个更长 URL 的前缀）不要。
+  for (const a of all) {
+    if (a.kind !== "url") continue;
+    if (all.some((b) => b !== a && b.kind === "url" && b.url.length > a.url.length && b.url.startsWith(a.url))) {
+      byKey.delete(a.key);
+    }
+  }
   return [...byKey.values()].sort((a, b) => b.row - a.row);
 }
 
