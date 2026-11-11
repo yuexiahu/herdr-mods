@@ -3,7 +3,6 @@
 // 只做右键菜单需要的事：找出候选、去掉句末标点、去掉 :行号。
 
 const SCHEME = /^(?:https?|ftp|file|ssh|git|mailto|tel|magnet|ipfs|ipns|gemini|gopher|news):/i;
-const ANY_SCHEME = /^[A-Za-z][A-Za-z0-9+.-]*:\/\//;
 const WIN_PATH = /^[A-Za-z]:[\\/]/;
 // \\server\share\...（Windows 的 UNC 路径）
 const UNC_PATH = /^\\\\[^\\]+\\/;
@@ -78,7 +77,7 @@ export function classify(token) {
   const t = clean(token);
   if (!t || t.length > 1024) return null;
   // 先找 URL（可能在中文标点后面），file:// 再按本机路径处理。
-  const url = embeddedUrl(t) ?? ((SCHEME.test(t) || ANY_SCHEME.test(t)) ? t : null);
+  const url = embeddedUrl(t) ?? (SCHEME.test(t) ? t : null);
   if (url) {
     if (/^file:\/\//i.test(url)) {
       let p = url.slice(7).replace(/^localhost/i, "");
@@ -99,20 +98,73 @@ export function classify(token) {
   return null;
 }
 
+// Markdown [名字](目标)：用名字显示，目标照常校验/打开。
+const MD_LINK = /\[([^\]]+)\]\(([^)\s]+)\)/g;
+// 下一行开头的续行（去掉终端/盒子的左边界）。
+const BOX = /^[\s\u2500-\u257f|]+/;
+const CONT = /^[\w\-.~:/?#@!$&*+,;=%]+/;
+
+function continuation(line) {
+  if (!line) return "";
+  const m = CONT.exec(line.replace(BOX, ""));
+  return m && m[0].length <= 64 ? m[0] : "";
+}
+
 // 屏幕文本 → 链接。同一个路径/URL 只留最后一次出现，并从下到上排
 // （最新输出在最下面，右键时通常想开那条）。
 export function findLinks(text) {
+  const lines = String(text ?? "").split(/\r?\n/);
+  // 终端每行都补齐到内容宽度：取最常见的行长，软换行拼出来的超长行会被排除。
+  const counts = new Map();
+  for (const l of lines) counts.set(l.length, (counts.get(l.length) ?? 0) + 1);
+  let width = 0, best = 0;
+  for (const [len, n] of counts) {
+    if (n > best || (n === best && len > width)) { width = len; best = n; }
+  }
+  if (best < 3) width = 0;
+
   const byKey = new Map();
-  String(text ?? "").split(/\r?\n/).forEach((line, row) => {
-    // Markdown 的 [文字](目标)：先把目标抠出来。
-    const plain = line.replace(/\]\(([^)\s]+)\)/g, " $1 ");
-    for (const token of plain.split(/\s+/)) {
-      const link = classify(token);
+  const skipFirst = new Set();
+  const add = (link, row, name) => {
+    const key = link.kind === "url" ? `u:${link.url}` : `p:${barePath(link.path)}`;
+    const prev = byKey.get(key);
+    byKey.set(key, { ...link, key, row, name: name ?? prev?.name });
+  };
+
+  lines.forEach((line, row) => {
+    // Markdown 链接整条拿掉：名字别当链接扫，目标单独加。
+    const marks = [];
+    const plain = line.replace(MD_LINK, (_all, name, target) => {
+      marks.push({ name, target });
+      return " ";
+    });
+    for (const { name, target } of marks) {
+      const link = classify(target);
+      if (link) add(link, row, name);
+    }
+
+    const tokens = plain.split(/\s+/);
+    for (let i = skipFirst.has(row) ? 1 : 0; i < tokens.length; i++) {
+      const token = tokens[i];
+      let link = classify(token);
       if (!link) continue;
-      const key = link.kind === "url" ? `u:${link.url}` : `p:${barePath(link.path)}`;
-      byKey.set(key, { ...link, key, row });
+      // 行尾的链接，且这行顶到了内容宽度：可能是硬换行断开的，接上下一行开头。
+      if (width && i === tokens.length - 1
+        && line.length <= width + 2
+        && line.replace(/\s+$/, "").length >= width - 1) {
+        const cont = continuation(lines[row + 1]);
+        if (cont) {
+          const joined = classify((link.kind === "url" ? link.url : link.path) + cont);
+          if (joined) {
+            link = joined;
+            skipFirst.add(row + 1);
+          }
+        }
+      }
+      add(link, row);
     }
   });
+
   const all = [...byKey.values()];
   // 被截断的 URL（是另一个更长 URL 的前缀）不要。
   for (const a of all) {

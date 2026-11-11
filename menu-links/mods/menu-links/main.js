@@ -102,8 +102,8 @@ function selectedLink(cx) {
   let text = "";
   try { text = String(cx.read_from_clipboard?.() ?? "").trim(); } catch { /* 没有剪贴板 */ }
   if (!text || text.length > 512 || /[\r\n]/.test(text)) return null;
-  // 整段当一条：路径里可以有空格，别按空白拆。
-  const link = classify(text);
+  // 整段当一条：路径里可以有空格，别按空白拆；Markdown 链接保留名字。
+  const link = findLinks(text)[0] ?? classify(text);
   return link ? { ...link, selected: true } : null;
 }
 
@@ -190,13 +190,13 @@ async function linkItems(text, machine, cwd, selected) {
   for (const l of links) {
     if (l.kind === "url") {
       const { label, hint } = describe(l, l.url);
-      out.push({ kind: "link", label, hint, hintIcon: "mods/menu-links/external-link.svg", icon: "mods/menu-links/link.svg", machine, open: { kind: "url", value: l.url } });
+      out.push({ kind: "link", label: l.name ?? label, hint, hintIcon: "mods/menu-links/external-link.svg", icon: "mods/menu-links/link.svg", machine, open: { kind: "url", value: l.url } });
     } else {
       const at = real.get(absolute(barePath(l.path), cwd, home));
       if (!at) continue;
       const { label, hint } = describe(l, at.real);
       out.push({
-        kind: "link", label, hint, machine,
+        kind: "link", label: l.name ?? label, hint, machine,
         icon: `mods/files/${at.dir ? "folder" : "file"}.svg`,
         open: { kind: "path", value: at.real },
       });

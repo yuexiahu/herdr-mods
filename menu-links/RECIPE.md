@@ -9,7 +9,7 @@
 ## 你会看到
 
 - 右键终端（程序接管鼠标时用 Shift+右键）打开的菜单顶部多出一组链接，和 Herdr 原来的 Split / Zoom / Close 之间有一条分隔线。
-- 每行左边是图标：URL 用链接图标，文件夹/文件用文件夹/文件图标。中间是文件名或 URL，右边是所在目录；URL 行右侧是一个外链图标，没有文字。
+- 每行左边是图标：URL 用链接图标，文件夹/文件用文件夹/文件图标。中间是文件名或 URL，右边是所在目录；URL 行右侧是一个外链图标，没有文字。Markdown 的 `[名字](目标)` 显示 `名字`，不是目标本身。
 - 右键前选中的文本如果整段就是一个链接，它会排在第一行。
 - 最多 6 条，按屏幕位置从下到上（最新输出在前）。没有链接时，菜单和 Herdr 原来的一样。
 - 菜单 420×460，使用主题的 `popover`、`foreground`、`muted`、`dim`、`hover`、`selected` 颜色。
@@ -19,9 +19,12 @@
 - 本机和另一台机器（WSL）上的终端都会扫；本机 Windows 的路径直连 `explorer.exe`，WSL 的路径在那边转成 Windows 路径后再打开。
 - 终端 `cwd` 从 Herdr 的 `terminals()` 取；`hc read <terminal> --json` 取当前屏幕文本（不含回滚历史）。
 - `links.js` 按 Ghostty 的链接规则提取候选：
-  - URL：`https?`、`ftp`、`ssh`、`mailto`、`tel`、`magnet` 等；`https://{host}{uri}`、`https://<host>/x`、`https://$HOST/x` 这类模板会被过滤；带 `//` 的协议必须有主机。紧贴中文/全角标点的 URL（`已推送：https://...`、`（https://...）`）会从 scheme 开始抠出来；同一 URL 的截断前缀（`.../herdr-mo` 和 `.../herdr-mods`）只留更长的那个。
+  - URL：`https?`、`ftp`、`ssh`、`mailto`、`tel`、`magnet` 等；`https://{host}{uri}`、`https://<host>/x`、`https://$HOST/x` 这类模板会被过滤；带 `//` 的协议必须有主机。
+  - 紧贴中文/全角标点的 URL（`已推送：https://...`、`（https://...）`）会从 scheme 开始抠出来；同一 URL 的截断前缀（`.../herdr-mo` 和 `.../herdr-mods`）只留更长的那个。
+  - 行尾的链接，如果这一行顶到了终端内容宽度（被硬换行拆开），会接上下一行开头的续行；软换行由 `hc read` 自己拼好。
+  - Markdown 的 `[名字](目标)` 整条先拿掉：目标按 URL/路径处理，名字只用于菜单显示。
   - 路径：`/绝对`、`~/`、`~\`、`C:\`、`C:/`、`\\server\share`、带目录和扩展名的相对路径（`/` 和 `\` 都行）；去掉 `:12`、`:12:7`、`:70-150` 行号；`file:///...` 转成路径（`file:///C:/...` → `C:/...`）。
-  - 同一个 URL/路径只留一条；Markdown 的 `[文字](链接)` 会先抠出目标。
+  - 同一个 URL/路径只留一条。
 - `~/` 用终端所在机器的 home（本机 `home()`，远程 `$HOME`）展开，相对路径用终端 `cwd` 补齐，然后**一次**批量检查存在性：本机 Windows 用 PowerShell `Get-Item -LiteralPath`，另一台机器用 `sh` 的 `test -e`。只留下存在的路径，并区分文件夹/文件；本机 Windows 用 `Get-Item.FullName` 返回规范路径，正斜杠会统一成反斜杠。
 - 点击：
   - 本机 Windows 路径 → `explorer.exe`。打开前把 `/` 换成 `\`：`explorer.exe` 会把 `/` 当自己的命令行开关，带正斜杠的路径会打开默认文件夹而不是目标。
@@ -59,5 +62,7 @@
 - 在 WSL 机器的终端里打印 `https://example.com` 和一个存在的路径（如 `~`），右键（或 Shift+右键）能看到链接行；点 URL 打开 Windows 默认浏览器，点路径打开资源管理器/关联程序。
 - 在本机 Windows 终端里打印 `C:\Users\<你>` 和 `https://example.com`，菜单显示存在的路径和 URL；点路径直接打开资源管理器，不存在的路径不出现。
 - 不存在的路径、`https://{host}{uri}` 不会出现在菜单里；`已推送：https://github.com/.../herdr-mods` 只出现完整 URL，不出现 `.../herdr-mo`。
+- 打印 `[官网](https://example.com/x)`，菜单显示 `官网`；点击打开该 URL。
+- 被硬换行拆开的 URL/路径（上一行以链接结尾、下一行以续行开头）能拼成完整链接。
 - 选中一段链接再右键，它排在第一行；点击后正常打开。
 - Split right / Split down / Zoom / Close pane 等原菜单项仍然工作。
