@@ -141,9 +141,10 @@ async function existingWindows(paths) {
     `$ps=@(${paths.map(quote).join(",")})`,
     "$i=0",
     "foreach ($p in $ps) {",
-    "  if (Test-Path -LiteralPath $p) {",
-    "    if ((Get-Item -LiteralPath $p).PSIsContainer) { $d='d' } else { $d='f' }",
-    "    [Console]::Out.Write(\"$i`t$d`t$p`0\")",
+    "  $item = Get-Item -LiteralPath $p -ErrorAction SilentlyContinue",
+    "  if ($item) {",
+    "    if ($item.PSIsContainer) { $d='d' } else { $d='f' }",
+    "    [Console]::Out.Write(\"$i`t$d`t$($item.FullName)`0\")",
     "  }",
     "  $i++",
     "}",
@@ -227,9 +228,13 @@ async function openLink(open, machine) {
   }
   const platform = window()?.platform;
   if (platform === "windows") {
-    // 本机 Windows：路径直接交给 explorer.exe；URL 用 rundll32，避开 = 参数。
-    if (open.kind === "url") await exec("rundll32.exe", ["url.dll,FileProtocolHandler", open.value]);
-    else await exec("explorer.exe", [open.value]);
+    // 本机 Windows：explorer.exe 把 / 当命令行开关，路径必须全是反斜杠；
+    // URL 用 rundll32，避开 = 参数。
+    if (open.kind === "url") {
+      await exec("rundll32.exe", ["url.dll,FileProtocolHandler", open.value]);
+    } else {
+      await exec("explorer.exe", [open.value.replace(/\//g, "\\")]);
+    }
     // explorer.exe / rundll32 成功时也可能返回 1，不看退出码。
     return;
   }
@@ -266,9 +271,12 @@ export default class Menu extends View {
     cx.spawn(async (cx) => {
       let links = [];
       try {
-        const info = JSON.parse((await hc(["get", terminal, "--json"])).stdout);
-        const read = JSON.parse((await hc(["read", terminal, "--json"])).stdout);
-        links = await linkItems(read.text ?? "", machine, info.cwd || "", selected);
+        // 终端 cwd 从 Herdr 的实时数据里取，少一次 hc 调用。
+        const cwd = terminals().find((t) => t.address === terminal)?.cwd ?? "";
+        const r = await hc(["read", terminal, "--json"]);
+        if (!r.stdout) throw new Error(`read 返回为空 (code ${r.code}) ${r.stderr ?? ""}`);
+        const read = JSON.parse(r.stdout);
+        links = await linkItems(read.text ?? "", machine, cwd, selected);
       } catch {
         // 读不到就只显示 Herdr 自己的菜单项。
       }

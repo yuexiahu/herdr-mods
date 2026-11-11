@@ -22,9 +22,9 @@
   - URL：`https?`、`ftp`、`ssh`、`mailto`、`tel`、`magnet` 等；`https://{host}{uri}`、`https://<host>/x`、`https://$HOST/x` 这类模板会被过滤；带 `//` 的协议必须有主机。
   - 路径：`/绝对`、`~/`、`~\`、`C:\`、`C:/`、`\\server\share`、带目录和扩展名的相对路径（`/` 和 `\` 都行）；去掉 `:12`、`:12:7`、`:70-150` 行号；`file:///...` 转成路径（`file:///C:/...` → `C:/...`）。
   - 同一个 URL/路径只留一条；Markdown 的 `[文字](链接)` 会先抠出目标。
-- `~/` 用终端所在机器的 home（本机 `home()`，远程 `$HOME`）展开，相对路径用终端 `cwd` 补齐，然后**一次**批量检查存在性：本机 Windows 用 PowerShell `Test-Path -LiteralPath`，另一台机器用 `sh` 的 `test -e`。只留下存在的路径，并区分文件夹/文件。
+- `~/` 用终端所在机器的 home（本机 `home()`，远程 `$HOME`）展开，相对路径用终端 `cwd` 补齐，然后**一次**批量检查存在性：本机 Windows 用 PowerShell `Get-Item -LiteralPath`，另一台机器用 `sh` 的 `test -e`。只留下存在的路径，并区分文件夹/文件；本机 Windows 用 `Get-Item.FullName` 返回规范路径，正斜杠会统一成反斜杠。
 - 点击：
-  - 本机 Windows 路径 → `explorer.exe`；
+  - 本机 Windows 路径 → `explorer.exe`。打开前把 `/` 换成 `\`：`explorer.exe` 会把 `/` 当自己的命令行开关，带正斜杠的路径会打开默认文件夹而不是目标。
   - WSL 路径 → `wslpath -w` → `/mnt/c/Windows/explorer.exe`；
   - URL → 本机用 `rundll32.exe url.dll,FileProtocolHandler`；WSL 用 `/mnt/c/Windows/System32/rundll32.exe`。不用 `explorer.exe` 打开 URL，因为它会把 URL 里的 `=` 当成自己的参数。
   - 失败时 `notify` 一条错误。`explorer.exe` / `rundll32` 成功时也可能返回 1，所以成功与否不按退出码判断。
